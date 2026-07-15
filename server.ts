@@ -192,8 +192,8 @@ const app = express();
 const PORT = 3000;
 
 // Increase request size limits to avoid memory crashes on large files
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
 // Download and view file endpoints
 app.get("/api/files/list", (req, res) => {
@@ -227,8 +227,22 @@ app.get("/api/files/download_raw/:b64Path", (req, res) => {
     const filePath = Buffer.from(req.params.b64Path, 'base64').toString('utf-8');
     const fullPath = path.resolve(process.cwd(), filePath);
     
-    // Prevent leaving CWD
-    if (!fullPath.startsWith(process.cwd())) {
+    // Prevent leaving CWD and handle symlinks safely
+    let realPath: string;
+    try {
+      realPath = fs.realpathSync(fullPath);
+    } catch (e) {
+      realPath = fullPath;
+    }
+    
+    let realCwd: string;
+    try {
+      realCwd = fs.realpathSync(process.cwd());
+    } catch (e) {
+      realCwd = process.cwd();
+    }
+
+    if (!realPath.startsWith(realCwd)) {
       return res.status(403).send("Erişim reddedildi.");
     }
     
@@ -253,6 +267,26 @@ app.get("/api/files/download/:fileId", (req, res) => {
   if (fileId.includes("..") || fileId.startsWith("/")) return res.status(400).send("Geçersiz dosya yolu.");
 
   const filePath = path.join(UPLOAD_DIR, fileId);
+  
+  // Robust check against symlinks / path traversal outside UPLOAD_DIR
+  let realFilePath: string;
+  try {
+    realFilePath = fs.realpathSync(filePath);
+  } catch (e) {
+    realFilePath = path.resolve(filePath);
+  }
+
+  let realUploadDir: string;
+  try {
+    realUploadDir = fs.realpathSync(UPLOAD_DIR);
+  } catch (e) {
+    realUploadDir = path.resolve(UPLOAD_DIR);
+  }
+
+  if (!realFilePath.startsWith(realUploadDir)) {
+    return res.status(403).send("Erişim reddedildi.");
+  }
+
   if (!fs.existsSync(filePath)) {
     console.error("[download] NOT FOUND:", filePath);
     return res.status(404).send("Dosya bulunamadı.");
@@ -682,9 +716,9 @@ ${conversationHistory}`;
             apiKey: key,
             httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
           });
-          console.log("[memory-extract] Gemini (gemini-3.5-flash) çağrılıyor...");
+          console.log("[memory-extract] Gemini (gemini-2.5-flash) çağrılıyor...");
           const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: prompt,
             config: { 
               responseMimeType: "application/json",
@@ -1222,17 +1256,38 @@ app.get("/api/models/benchmark", (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { modelId, providerId, messages, customApiKey, systemInstruction: originalInstruction, webSearchEnabled, attachedFiles, routingMode, aiMode = "balanced", effortLevel = "medium", behaviorMode = "normal", deepThinkEnabled = false } = req.body;
+  const { modelId, providerId, messages, customApiKey, systemInstruction: originalInstruction, webSearchEnabled, attachedFiles, routingMode, aiMode = "balanced", effortLevel = "medium", behaviorMode = "normal", deepThinkEnabled = false, stream = true } = req.body;
   const startTime = Date.now();
   
-  // Set headers for SSE streaming
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
+  const isStreaming = stream !== false;
+
+  if (isStreaming) {
+    // Set headers for SSE streaming
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+  } else {
+    res.setHeader("Content-Type", "application/json");
+  }
+
+  // Accumulator for non-streaming requests
+  let accumulatedText = "";
+  let accumulatedReasoning = "";
+  let finalDoneData: any = null;
 
   // Helper to send events
   const sendEvent = (type: string, data: any) => {
-    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
+    if (type === "content") {
+      accumulatedText += data.content || "";
+    } else if (type === "reasoning") {
+      accumulatedReasoning += data.content || "";
+    } else if (type === "done") {
+      finalDoneData = data;
+    }
+
+    if (isStreaming) {
+      res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
+    }
   };
 
   // Dynamic parameters based on behaviorMode, aiMode and effortLevel
@@ -2059,29 +2114,43 @@ Kurallar:
     const outTokens = estimateTokenCount(responseText);
     const modelCost = (inTokens * targetModel.pricing.inputPer1M + outTokens * targetModel.pricing.outputPer1M) / 1000000;
 
-    sendEvent("done", {
-      metadata: {
-        id: `msg-${Math.random().toString(36).substr(2, 9)}`,
-        role: "assistant",
-        content: responseText,
+    const finalMetadata = {
+      id: `msg-${Math.random().toString(36).substr(2, 9)}`,
+      role: "assistant",
+      content: responseText,
+      reasoning: reasoning || undefined,
+      modelId,
+      timestamp: new Date().toLocaleTimeString(),
+      latencyMs,
+      tokens: { input: inTokens, output: outTokens, total: inTokens + outTokens },
+      cost: modelCost,
+      warning,
+      toolCalls: serverPreSearchToolCalls.length > 0 ? serverPreSearchToolCalls : undefined,
+      compactedHistory,
+      appliedParams: { temperature, maxTokens: max_tokens, aiMode, effortLevel }
+    };
+
+    if (isStreaming) {
+      sendEvent("done", { metadata: finalMetadata });
+      res.end();
+    } else {
+      res.json({
+        success: true,
+        text: responseText,
         reasoning: reasoning || undefined,
-        modelId,
-        timestamp: new Date().toLocaleTimeString(),
-        latencyMs,
-        tokens: { input: inTokens, output: outTokens, total: inTokens + outTokens },
-        cost: modelCost,
-        warning,
         toolCalls: serverPreSearchToolCalls.length > 0 ? serverPreSearchToolCalls : undefined,
-        compactedHistory,
-        appliedParams: { temperature, maxTokens: max_tokens, aiMode, effortLevel }
-      }
-    });
-    res.end();
+        metadata: finalMetadata
+      });
+    }
 
   } catch (error: any) {
     console.error("[GATEWAY ERROR]", error);
-    sendEvent("error", { message: error.message });
-    res.end();
+    if (isStreaming) {
+      sendEvent("error", { message: error.message });
+      res.end();
+    } else {
+      res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 
@@ -2129,20 +2198,20 @@ app.post("/api/media/generate-image", async (req, res) => {
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
-      console.log(`[generate-image] Gemini (gemini-3.1-flash-lite-image) çağrılıyor...`);
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-image',
-        contents: { parts: [{ text: prompt }] },
-        config: { imageConfig: { aspectRatio: "1:1" } }
+      console.log(`[generate-image] Imagen (imagen-3.0-generate-002) çağrılıyor...`);
+      const response = await ai.models.generateImages({
+        model: 'imagen-3.0-generate-002',
+        prompt: prompt,
+        config: {
+          numberOfImages: 1,
+          aspectRatio: "1:1",
+          outputMimeType: "image/png"
+        }
       });
 
       let imageUrl = "";
-      const parts = response.candidates?.[0]?.content?.parts || [];
-      for (const part of parts) {
-        if (part.inlineData) {
-          imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-          break;
-        }
+      if (response.generatedImages?.[0]?.image?.imageBytes) {
+        imageUrl = `data:image/png;base64,${response.generatedImages[0].image.imageBytes}`;
       }
 
       if (!imageUrl) throw new Error("Gemini response did not contain inline image data.");
@@ -2152,9 +2221,9 @@ app.post("/api/media/generate-image", async (req, res) => {
     console.error("[generate-image] Failed, using fallback:", error);
     const seed = encodeURIComponent(prompt.substring(0, 40).replace(/[^a-zA-Z0-9]/g, "_"));
     return res.json({
-      success: true,
+      success: false,
       url: `https://picsum.photos/seed/${seed}/800/800`,
-      note: "Fallback image used due to API error."
+      note: `Görsel üretimi başarısız oldu (${error.message}). Gösterilen görsel örnek bir taslaktır.`
     });
   }
 });
@@ -2210,10 +2279,13 @@ app.post("/api/media/tts", async (req, res) => {
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
-      console.log(`[tts] Gemini TTS çağrılıyor...`);
+      console.log(`[tts] Gemini TTS (gemini-2.5-flash) çağrılıyor...`);
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-tts-preview",
+        model: "gemini-2.5-flash",
         contents: text,
+        config: {
+          responseModalities: ["AUDIO"]
+        }
       });
 
       let audioUrl = "";
@@ -2229,22 +2301,11 @@ app.post("/api/media/tts", async (req, res) => {
       return res.json({ success: true, url: audioUrl, waveData });
     }
   } catch (error: any) {
-    console.warn("[tts] TTS failed, running translate fallback:", error.message);
-    try {
-      const translateTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=tr&client=tw-ob&q=${encodeURIComponent(text)}`;
-      const fetchRes = await fetch(translateTtsUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
-        }
-      });
-
-      if (!fetchRes.ok) throw new Error(`Google Translate TTS returned status ${fetchRes.status}`);
-      const buffer = await fetchRes.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString("base64");
-      return res.json({ success: true, url: `data:audio/mpeg;base64,${base64}`, waveData, note: "Fallback used." });
-    } catch (fallbackError: any) {
-      return res.json({ success: false, error: `Ses sentezleme başarısız oldu: ${fallbackError.message}` });
-    }
+    console.error("[tts] TTS failed:", error);
+    return res.status(500).json({ 
+      success: false, 
+      error: `Ses sentezleme başarısız oldu: ${error.message}. Lütfen geçerli bir API anahtarı sağlayın veya tarayıcınızın yerel ses sentezleyicisine otomatik yönlendirmeye izin verin.`
+    });
   }
 });
 
@@ -2335,9 +2396,9 @@ app.post("/api/files/upload", upload.single("file"), async (req, res) => {
               }
             }
           });
-          console.log(`[files-upload] Gemini (gemini-3.5-flash) ile görsel analiz ediliyor, dosya: ${originalname}`);
+          console.log(`[files-upload] Gemini (gemini-2.5-flash) ile görsel analiz ediliyor, dosya: ${originalname}`);
           const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: [
               {
                 inlineData: {
@@ -2487,9 +2548,9 @@ app.post("/api/files/parse", async (req, res) => {
               }
             }
           });
-          console.log(`[files-parse] Gemini (gemini-3.5-flash) ile görsel analiz ediliyor, dosya: ${fileName}`);
+          console.log(`[files-parse] Gemini (gemini-2.5-flash) ile görsel analiz ediliyor, dosya: ${fileName}`);
           const response = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: [
               {
                 inlineData: {
@@ -2824,7 +2885,7 @@ Return ONLY a valid JSON object matching this schema under the "agents" key, no 
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"

@@ -28,10 +28,10 @@ const STATS_FILE = path.join(process.cwd(), 'tmp', 'model_stats.json');
 export class ModelOrchestrator {
   static providers: Record<string, ModelProvider> = {
     'openai': { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModels: ['gpt-4o', 'gpt-4o-mini', 'o1-mini'] },
-    'google': { id: 'google', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModels: ['gemini-3.5-flash', 'gemini-3.1-pro-preview'] },
+    'google': { id: 'google', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModels: ['gemini-2.5-flash', 'gemini-2.5-pro'] },
     'anthropic': { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', defaultModels: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'] },
     'groq': { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModels: ['llama-3.1-70b-versatile', 'llama-3.1-8b-instant'] },
-    'openrouter': { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModels: ['anthropic/claude-3.5-sonnet', 'google/gemini-3.5-flash'] }
+    'openrouter': { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModels: ['anthropic/claude-3.5-sonnet', 'google/gemini-2.5-flash'] }
   };
 
   static init() {
@@ -130,9 +130,9 @@ export class ModelOrchestrator {
     if (available.length === 0) {
       // If no stats yet or no healthy models found, provide sensible defaults based on mode
       // Prefer models that are not the original one
-      if (mode === "fast") return { modelId: originalProvider === "openai" ? "gemini-3.5-flash" : "gpt-4o-mini", provider: originalProvider === "openai" ? "google" : "openai" };
+      if (mode === "fast") return { modelId: originalProvider === "openai" ? "gemini-2.5-flash" : "gpt-4o-mini", provider: originalProvider === "openai" ? "google" : "openai" };
       if (mode === "deep" || mode === "agent" || mode === "swarm") return { modelId: originalProvider === "anthropic" ? "gpt-4o" : "claude-3-5-sonnet-20241022", provider: originalProvider === "anthropic" ? "openai" : "anthropic" };
-      return { modelId: originalProvider === "google" ? "gpt-4o-mini" : "gemini-3.5-flash", provider: originalProvider === "google" ? "openai" : "google" };
+      return { modelId: originalProvider === "google" ? "gpt-4o-mini" : "gemini-2.5-flash", provider: originalProvider === "google" ? "openai" : "google" };
     }
 
     // Sort based on mode

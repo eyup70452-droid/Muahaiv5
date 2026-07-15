@@ -1,9 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const RULES_FILE = path.join(process.cwd(), "project-rules.json");
 const AUTOMATIONS_FILE = path.join(process.cwd(), "automations.json");
@@ -438,9 +439,9 @@ Düzenlenmiş kod:`;
   // ==========================================
   // 4. Git Integration Endpoints
   // ==========================================
-  const runGit = async (args: string) => {
+  const runGitSecure = async (args: string[]) => {
     try {
-      const { stdout } = await execAsync(`git ${args}`, { timeout: 10000 });
+      const { stdout } = await execFileAsync("git", args, { timeout: 10000 });
       return stdout.trim();
     } catch (err: any) {
       throw new Error(err.stderr || err.message);
@@ -452,7 +453,7 @@ Düzenlenmiş kod:`;
       // Check if git is initialized
       let isGit = false;
       try {
-        await execAsync("git rev-parse --is-inside-work-tree");
+        await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"]);
         isGit = true;
       } catch (e) {
         return res.json({
@@ -467,8 +468,8 @@ Düzenlenmiş kod:`;
         });
       }
 
-      const branch = await runGit("rev-parse --abbrev-ref HEAD");
-      const statusText = await runGit("status --porcelain");
+      const branch = await runGitSecure(["rev-parse", "--abbrev-ref", "HEAD"]);
+      const statusText = await runGitSecure(["status", "--porcelain"]);
       
       const staged: any[] = [];
       const unstaged: any[] = [];
@@ -498,7 +499,7 @@ Düzenlenmiş kod:`;
       let ahead = 0;
       let behind = 0;
       try {
-        const ab = await runGit(`rev-list --left-right --count HEAD...origin/${branch}`);
+        const ab = await runGitSecure(["rev-list", "--left-right", "--count", `HEAD...origin/${branch}`]);
         const parts = ab.split("\t");
         if (parts.length === 2) {
           ahead = parseInt(parts[0], 10) || 0;
@@ -524,7 +525,7 @@ Düzenlenmiş kod:`;
   app.get("/api/git/log", async (req: any, res: any) => {
     try {
       const limit = parseInt(req.query.limit, 10) || 20;
-      const logText = await runGit(`log -n ${limit} --pretty=format:"%h|%s|%an|%ad" --date=short`);
+      const logText = await runGitSecure(["log", "-n", String(limit), "--pretty=format:%h|%s|%an|%ad", "--date=short"]);
       const commits = logText.split("\n").filter(Boolean).map((line) => {
         const [hash, message, author, date] = line.replace(/^"/, "").replace(/"$/, "").split("|");
         return { hash, message, author, date, files: [] };
@@ -538,14 +539,14 @@ Düzenlenmiş kod:`;
   app.get("/api/git/diff", async (req: any, res: any) => {
     try {
       const { file, staged } = req.query;
-      let cmd = "diff";
+      const args = ["diff"];
       if (staged === "true") {
-        cmd += " --cached";
+        args.push("--cached");
       }
       if (file) {
-        cmd += ` -- "${file}"`;
+        args.push("--", String(file));
       }
-      const diff = await runGit(cmd);
+      const diff = await runGitSecure(args);
       return res.json({ success: true, diff });
     } catch (err: any) {
       return res.json({ success: false, error: err.message });
@@ -555,8 +556,13 @@ Düzenlenmiş kod:`;
   app.post("/api/git/stage", async (req: any, res: any) => {
     try {
       const { files } = req.body;
-      const fileArgs = files && files.length > 0 ? files.map((f: string) => `"${f}"`).join(" ") : ".";
-      await runGit(`add ${fileArgs}`);
+      const args = ["add"];
+      if (files && files.length > 0) {
+        args.push(...files);
+      } else {
+        args.push(".");
+      }
+      await runGitSecure(args);
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -566,8 +572,13 @@ Düzenlenmiş kod:`;
   app.post("/api/git/unstage", async (req: any, res: any) => {
     try {
       const { files } = req.body;
-      const fileArgs = files && files.length > 0 ? files.map((f: string) => `"${f}"`).join(" ") : ".";
-      await runGit(`restore --staged ${fileArgs}`);
+      const args = ["restore", "--staged"];
+      if (files && files.length > 0) {
+        args.push(...files);
+      } else {
+        args.push(".");
+      }
+      await runGitSecure(args);
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -580,7 +591,7 @@ Düzenlenmiş kod:`;
       if (!message) {
         return res.status(400).json({ success: false, error: "Commit mesajı gereklidir." });
       }
-      const result = await runGit(`commit -m "${message.replace(/"/g, '\\"')}"`);
+      const result = await runGitSecure(["commit", "-m", message]);
       return res.json({ success: true, result });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -611,10 +622,13 @@ Commit mesajı:`;
   app.post("/api/git/branch", async (req: any, res: any) => {
     try {
       const { name, checkout } = req.body;
+      if (!name) {
+        return res.status(400).json({ success: false, error: "Branch adı gereklidir." });
+      }
       if (checkout) {
-        await runGit(`checkout -b "${name}"`);
+        await runGitSecure(["checkout", "-b", name]);
       } else {
-        await runGit(`branch "${name}"`);
+        await runGitSecure(["branch", name]);
       }
       return res.json({ success: true });
     } catch (err: any) {
@@ -625,7 +639,10 @@ Commit mesajı:`;
   app.post("/api/git/checkout", async (req: any, res: any) => {
     try {
       const { branch } = req.body;
-      await runGit(`checkout "${branch}"`);
+      if (!branch) {
+        return res.status(400).json({ success: false, error: "Branch adı gereklidir." });
+      }
+      await runGitSecure(["checkout", branch]);
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -634,7 +651,7 @@ Commit mesajı:`;
 
   app.get("/api/git/branches", async (req: any, res: any) => {
     try {
-      const branchesText = await runGit("branch --format=\"%(refname:short)\"");
+      const branchesText = await runGitSecure(["branch", "--format=%(refname:short)"]);
       const branches = branchesText.split("\n").filter(Boolean);
       return res.json({ success: true, branches });
     } catch (err: any) {
@@ -800,9 +817,32 @@ Commit mesajı:`;
       let actionLog = "";
       for (const action of auto.actions) {
         if (action.type === "run_command" && action.command) {
+          const trimmedCmd = action.command.trim();
+          const parts = trimmedCmd.split(/\s+/);
+          const baseCmd = parts[0];
+          const args = parts.slice(1);
+
+          // Whitelist specific complete patterns
+          const isAllowedPattern = (cmdStr: string): boolean => {
+            const clean = cmdStr.trim();
+            return [
+              "git status",
+              "git log",
+              "git branch",
+              "npm run lint",
+              "npm run build",
+              "npm test"
+            ].includes(clean) || clean.startsWith("echo ");
+          };
+
+          if (!isAllowedPattern(trimmedCmd)) {
+            actionLog += `[Güvenlik Engeli] Komut güvenlik denetimini geçemedi: "${action.command}" (Yalnızca güvenli komutlara [git status, git log, git branch, npm run lint, npm run build, npm test, echo] ve zincirleme operatör içermeyen girdilere izin verilir).\n`;
+            continue;
+          }
+
           actionLog += `[Komut Çalıştırılıyor] ${action.command}\n`;
           try {
-            const { stdout, stderr } = await execAsync(action.command, { timeout: 30000 });
+            const { stdout, stderr } = await execFileAsync(baseCmd, args, { timeout: 30000 });
             actionLog += `[Çıktı]\n${stdout}\n`;
             if (stderr) actionLog += `[Hata Çıktısı]\n${stderr}\n`;
           } catch (execErr: any) {

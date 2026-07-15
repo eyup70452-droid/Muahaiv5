@@ -524,7 +524,7 @@ export default function App() {
             return [...otherModels, ...newModels];
           });
           setSession(prev => {
-            const recommendedModelId = newModelIds.find(id => id.includes("gpt-4o") || id.includes("claude-3-5") || id.includes("gemini-1.5-pro") || id.includes("gemini-2.5") || id.includes("gemini-3.1") || id.includes("gemini-3.5") || id.includes("llama-3.3") || id.includes("deepseek-chat")) || newModelIds[0];
+            const recommendedModelId = newModelIds.find(id => id.includes("gpt-4o") || id.includes("claude-3-5") || id.includes("gemini-2.0") || id.includes("gemini-2.5") || id.includes("llama-3.3") || id.includes("deepseek-chat")) || newModelIds[0];
             let nextActiveIds = Array.from(new Set([...prev.activeModelIds, recommendedModelId]));
             
             // If in manual mode and multiple models become active, keep only the most recent one to enforce single selection
@@ -919,7 +919,7 @@ export default function App() {
       }));
 
       try {
-        const { generateProjectPlan } = await import("./core/agents/plannerAgent");
+        const { generateProjectPlan } = await import("./core/agents/planner");
         const plan = await generateProjectPlan(textToProcess);
         
         const planMarkdown = `### 📋 Stratejik Proje Planı\n\n**Hedef:** ${plan.goal}\n**Karmaşıklık Skoru:** ${plan.complexity}/10\n\n**Yol Haritası (Roadmap):**\n${plan.steps.map(s => `- [${s.status === 'completed' ? 'X' : ' '}] **${s.title}** (${s.estimatedEffort}): ${s.description}`).join("\n")}\n\n**Önerilen AI Ekibi:** ${plan.suggestedModels.join(", ")}`;
@@ -1800,8 +1800,41 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, apiKey })
       });
-      return await res.json();
+      const data = await res.json();
+      if (data && data.success) {
+        return data;
+      } else {
+        throw new Error((data && data.error) || "Sunucu ses sentezleme başarısız oldu.");
+      }
     } catch (err: any) {
+      console.warn("[TTS Fallback] Yerel tarayıcı ses sentezleme başlatılıyor:", err.message);
+      
+      // Native Web Speech API fallback
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = "tr-TR";
+          
+          // Try to select a Turkish voice if available
+          const voices = window.speechSynthesis.getVoices();
+          const trVoice = voices.find(v => v.lang.includes("tr"));
+          if (trVoice) {
+            utterance.voice = trVoice;
+          }
+          
+          window.speechSynthesis.speak(utterance);
+          const mockWave = Array.from({ length: 40 }, () => Math.round(15 + Math.random() * 80));
+          return { 
+            success: true, 
+            url: "local-speech-synthesis", 
+            waveData: mockWave,
+            note: "Yerel tarayıcı ses sentezleyicisi kullanılıyor."
+          };
+        } catch (synthErr: any) {
+          return { success: false, error: `Yerel sentezleme de başarısız: ${synthErr.message}` };
+        }
+      }
       return { success: false, error: err.message };
     }
   };

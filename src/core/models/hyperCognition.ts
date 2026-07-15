@@ -52,7 +52,7 @@ export class HyperCognitionEngine {
 
   /**
    * Parses code blocks from a text response and validates their syntax.
-   * If a syntax error is detected, and we have a Google API Key, we use gemini-3.5-flash
+   * If a syntax error is detected, and we have a Google API Key, we use gemini-2.5-flash
    * as a "Cognitive Corrector" to instantly fix the code.
    */
   static async healModelOutput(
@@ -115,7 +115,7 @@ export class HyperCognitionEngine {
       }
     }
 
-    // If healing is needed and we have an API key, we run a fast correction request using gemini-3.5-flash
+    // If healing is needed and we have an API key, we run a fast correction request using gemini-2.5-flash
     if (needsHeal && googleApiKey) {
       console.log(`[HyperCognition] Auto-Correction triggered. Reason: ${healReason}`);
       try {
@@ -140,7 +140,7 @@ Lütfen sadece onarılmış metni çıktı olarak ver. "Düzeltilmiş hali şudu
 `;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.5-flash",
           contents: healPrompt
         });
 

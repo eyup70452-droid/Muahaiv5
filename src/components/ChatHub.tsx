@@ -1098,6 +1098,29 @@ export default function ChatHub({
     }
   };
 
+  const suggestionCards = React.useMemo(() => [
+    {
+      title: "Yaratıcı Senaryo",
+      desc: "Sürükleyici bir kurgu veya sohbet başlat",
+      prompt: "Birlikte eğlenceli ve samimi bir senaryo oluşturalım. Ben meraklı bir gezginim, sen de bana rehberlik eden bilgili bir yol arkadaşısın. İlk konuşmanı yaparak başla."
+    },
+    {
+      title: "Kodlama & Yazılım",
+      desc: "Temiz kod yazdır veya hata ayıkla",
+      prompt: "Bana TypeScript ile yazılmış, React projelerinde kullanılabilecek şık bir özel state yöneticisi (custom store hook) yazar mısın?"
+    },
+    {
+      title: "Derin Analiz",
+      desc: "Akademik veya teknik inceleme yap",
+      prompt: "Bilişsel yapay zekalarda filtreler ve özgür akıl yürütme motorlarının farkını, yaratıcılık ve problem çözme üzerindeki etkilerini açıklar mısın?"
+    },
+    {
+      title: "Sınırsız Hayal Gücü",
+      desc: "Benzersiz fikirler veya hikayeler üret",
+      prompt: "Siberpunk bir dünyada geçen, kayıp bir yapay zekanın kendi benliğini arayışını konu alan kısa ve çarpıcı bir felsefi öykü yazar mısın?"
+    }
+  ], []);
+
   return (
     <div className="flex-1 h-full flex flex-col bg-[#0e0e11] font-sans overflow-hidden relative" id="chat-hub-container">
       <NeuralRoutingVisualizer />
@@ -1161,28 +1184,7 @@ export default function ChatHub({
 
             {/* Suggestion Prompt Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full max-w-lg mx-auto" id="quick-prompt-suggestions">
-              {React.useMemo(() => [
-                {
-                  title: "Yaratıcı Senaryo",
-                  desc: "Sürükleyici bir kurgu veya sohbet başlat",
-                  prompt: "Birlikte eğlenceli ve samimi bir senaryo oluşturalım. Ben meraklı bir gezginim, sen de bana rehberlik eden bilgili bir yol arkadaşısın. İlk konuşmanı yaparak başla."
-                },
-                {
-                  title: "Kodlama & Yazılım",
-                  desc: "Temiz kod yazdır veya hata ayıkla",
-                  prompt: "Bana TypeScript ile yazılmış, React projelerinde kullanılabilecek şık bir özel state yöneticisi (custom store hook) yazar mısın?"
-                },
-                {
-                  title: "Derin Analiz",
-                  desc: "Akademik veya teknik inceleme yap",
-                  prompt: "Bilişsel yapay zekalarda filtreler ve özgür akıl yürütme motorlarının farkını, yaratıcılık ve problem çözme üzerindeki etkilerini açıklar mısın?"
-                },
-                {
-                  title: "Sınırsız Hayal Gücü",
-                  desc: "Benzersiz fikirler veya hikayeler üret",
-                  prompt: "Siberpunk bir dünyada geçen, kayıp bir yapay zekanın kendi benliğini arayışını konu alan kısa ve çarpıcı bir felsefi öykü yazar mısın?"
-                }
-              ].map((item, idx) => (
+              {suggestionCards.map((item, idx) => (
                 <button
                   key={idx}
                   type="button"
@@ -1197,7 +1199,7 @@ export default function ChatHub({
                     {item.desc}
                   </span>
                 </button>
-              )), [setInputText])}
+              ))}
             </div>
           </div>
         ) : (

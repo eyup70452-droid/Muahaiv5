@@ -211,10 +211,10 @@ export default function MediaHub({ onGenerateImage, onSynthesizeSpeech }: MediaH
                     <span className="text-xs text-fuchsia-400 font-medium block animate-pulse">Metin Sentezleniyor...</span>
                   </div>
                 ) : synthesizedAudioUrl ? (
-                  <div className="w-full space-y-4 text-center">
+                  <div className="w-full space-y-4 text-center animate-fade-in">
                     <div className="relative group inline-block">
-                      <div className="w-10 h-10 bg-fuchsia-500/10 text-fuchsia-400 rounded-full flex items-center justify-center mx-auto">
-                        <Play className="w-4 h-4 animate-pulse" />
+                      <div className="w-10 h-10 bg-fuchsia-500/10 text-fuchsia-400 rounded-full flex items-center justify-center mx-auto shadow-inner border border-fuchsia-500/20">
+                        <Volume2 className="w-4 h-4 animate-pulse" />
                       </div>
                       <button 
                         onClick={() => handleSaveToMemory("audio", ttsText, "Ses Sentezi")}
@@ -225,7 +225,27 @@ export default function MediaHub({ onGenerateImage, onSynthesizeSpeech }: MediaH
                         <Database className="w-3 h-3" />
                       </button>
                     </div>
-                    <audio src={synthesizedAudioUrl} controls className="w-full max-w-xs mx-auto text-xs" />
+                    {synthesizedAudioUrl === "local-speech-synthesis" ? (
+                      <div className="space-y-2">
+                        <span className="text-xs text-fuchsia-400 font-medium block">Tarayıcı Yerel Sesi Aktif</span>
+                        <p className="text-[10px] text-zinc-400 max-w-xs mx-auto">Ses sentezi yerel Web Speech API ile tarayıcınız üzerinden oynatılıyor.</p>
+                        <button
+                          onClick={() => {
+                            if (typeof window !== "undefined" && window.speechSynthesis) {
+                              window.speechSynthesis.cancel();
+                              const u = new SpeechSynthesisUtterance(ttsText);
+                              u.lang = "tr-TR";
+                              window.speechSynthesis.speak(u);
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-[#16161f] border border-[#1f1f26] rounded-lg text-[10px] text-zinc-300 hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1 mx-auto"
+                        >
+                          <Play className="w-3 h-3" /> Tekrar Oynat
+                        </button>
+                      </div>
+                    ) : (
+                      <audio src={synthesizedAudioUrl} controls className="w-full max-w-xs mx-auto text-xs" />
+                    )}
                   </div>
                 ) : (
                   <span className="text-xs text-zinc-500">Seslendirilmiş ses dosyası burada gösterilecek</span>

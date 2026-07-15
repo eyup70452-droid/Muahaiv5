@@ -1,5 +1,5 @@
 import { logger } from "../utils/systemLogger";
-import { generateProjectPlan } from "./plannerAgent";
+import { generateProjectPlan } from "./planner";
 import { runDeepResearch } from "./researchAgent";
 import { systemEvents } from "../utils/systemEvents";
 import { resilience } from "../utils/resilience";

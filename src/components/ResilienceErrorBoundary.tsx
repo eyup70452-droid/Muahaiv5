@@ -23,7 +23,7 @@ export default class ResilienceErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    logger.error("[Resilience] Uncaught UI Exception:", error, errorInfo);
+    logger.error("[Resilience] Uncaught UI Exception:", { error, errorInfo }, "ErrorBoundary");
   }
 
   private handleReset = () => {

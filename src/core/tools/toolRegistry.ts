@@ -113,7 +113,7 @@ export async function getToolRegistry(): Promise<Record<string, Tool>> {
             const { GoogleGenAI } = await import("@google/genai");
             const ai = new GoogleGenAI({ apiKey: key });
             const response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-2.5-flash",
               contents: prompt
             });
             const responseText = response.text || "";
@@ -206,15 +206,31 @@ export async function getToolRegistry(): Promise<Record<string, Tool>> {
 
     code_execution_tool: {
       id: "code_execution_tool",
-      description: "Sandbox ortamında JavaScript/TypeScript kodu çalıştırır.",
+      description: "Geliştirici konsolu üzerinde doğrudan JavaScript/TypeScript kodu yürütür. Kod, ana uygulama ortamında çalıştırılır.",
       run: async (input: { code: string; language: string }) => {
         const { exec } = await import('child_process');
         const fs = await import('fs');
         const path = await import('path');
         
+        const code = input.code || "";
+        const forbiddenPatterns = [
+          /child_process/i,
+          /exec/i,
+          /spawn/i,
+          /fs\.unlink/i,
+          /rm /i,
+          /unlinkSync/i,
+          /rmdir/i,
+          /process\.exit/i,
+          /process\.kill/i
+        ];
+        if (forbiddenPatterns.some(pat => pat.test(code))) {
+          return { output: "", errors: "Güvenlik Engeli: Kod içinde izin verilmeyen modül veya fonksiyon kullanımı tespit edildi." };
+        }
+
         const ext = input.language === 'typescript' ? 'ts' : 'js';
         const file = path.join(process.cwd(), `tmp_${Date.now()}.${ext}`);
-        fs.writeFileSync(file, input.code);
+        fs.writeFileSync(file, code);
         
         return new Promise((resolve) => {
           const cmd = ext === 'ts' ? `npx tsx ${file}` : `node ${file}`;

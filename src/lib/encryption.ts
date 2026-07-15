@@ -1,16 +1,40 @@
 import CryptoJS from 'crypto-js';
 
-const SECRET_KEY = 'ai_orchestrator_secure_key_123!';
+const getSecretKey = (): string => {
+  if (typeof window === "undefined") {
+    return "ai_orch_server_fallback";
+  }
+  let deviceId = localStorage.getItem("ai_nexus_device_id");
+  if (!deviceId) {
+    deviceId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    localStorage.setItem("ai_nexus_device_id", deviceId);
+  }
+  const part1 = "ai_orch_secure_";
+  const part2 = deviceId.substring(0, 12);
+  const part3 = window.location.hostname || "localhost";
+  return part1 + part2 + "_" + part3;
+};
 
 export const encryptData = (data: string): string => {
-  return CryptoJS.AES.encrypt(data, SECRET_KEY).toString();
+  return CryptoJS.AES.encrypt(data, getSecretKey()).toString();
 };
 
 export const decryptData = (ciphertext: string): string => {
   try {
-    const bytes = CryptoJS.AES.decrypt(ciphertext, SECRET_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
+    const bytes = CryptoJS.AES.decrypt(ciphertext, getSecretKey());
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    if (decrypted) return decrypted;
+    throw new Error("Mismatch");
   } catch (e) {
+    // Soft migration from legacy hardcoded key to prevent breaking existing user sessions
+    try {
+      const legacyKey = 'ai_orchestrator_secure_key_123!';
+      const bytesLegacy = CryptoJS.AES.decrypt(ciphertext, legacyKey);
+      const legacyDecrypted = bytesLegacy.toString(CryptoJS.enc.Utf8);
+      if (legacyDecrypted) {
+        return legacyDecrypted;
+      }
+    } catch (e2) {}
     return "";
   }
 };
