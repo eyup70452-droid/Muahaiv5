@@ -3,6 +3,30 @@ import { runTool } from "../tools/runTool";
 import { AgentProfileManager, AgentProfile } from "./agentProfileManager";
 import { FileLockManager } from "./lockManager";
 
+// Robust JSON parse helper that gracefully handles raw LLM responses, markdown fences, and bad formatting
+function safeParseJson<T>(raw: string, fallback: T): T {
+  if (!raw || typeof raw !== "string") return fallback;
+  let clean = raw.trim();
+  if (clean.includes("```")) {
+    clean = clean.replace(/```json/gi, "").replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
+  }
+  try {
+    return JSON.parse(clean) as T;
+  } catch (err) {
+    // Brute-force JSON block extraction via curly brace or bracket scanning
+    const match = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]) as T;
+      } catch (err2) {
+        console.warn("[safeParseJson] Fallback extraction parse failed:", err2);
+      }
+    }
+    console.error("[safeParseJson] Error parsing string, returning fallback:", clean.substring(0, 200));
+    return fallback;
+  }
+}
+
 export async function runSwarmAgent(goal: string, apiKey?: string): Promise<SwarmFinalOutput> {
   const memory: SwarmMemory = {
     goal,
@@ -39,18 +63,11 @@ export async function runSwarmAgent(goal: string, apiKey?: string): Promise<Swar
   };
 
   if (plannerRes.success && plannerRes.result?.response) {
-    let raw = String(plannerRes.result.response);
-    if (raw.includes("```")) {
-      raw = raw.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
-    }
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (parsed.researcherTask) tasks.researcherTask = parsed.researcherTask;
-      if (parsed.coderTask) tasks.coderTask = parsed.coderTask;
-      if (parsed.analyzerTask) tasks.analyzerTask = parsed.analyzerTask;
-    } catch(e) {
-      console.warn("Planner output parsing failed, using defaults.");
-    }
+    const raw = String(plannerRes.result.response);
+    const parsed = safeParseJson<any>(raw, {});
+    if (parsed.researcherTask) tasks.researcherTask = parsed.researcherTask;
+    if (parsed.coderTask) tasks.coderTask = parsed.coderTask;
+    if (parsed.analyzerTask) tasks.analyzerTask = parsed.analyzerTask;
   }
   memory.agentOutputs.planner = tasks;
 
@@ -88,9 +105,8 @@ export async function runSwarmAgent(goal: string, apiKey?: string): Promise<Swar
 Task: ${tasks.researcherTask}. Choose tool: 'web_search_tool' or 'file_read_tool'. Output JSON: { "tool": "...", "input": { "query": "..." } }. ONLY JSON.`;
     const aiRes = await runTool("ai_think_tool", { prompt, __apiKey: apiKey }, { apiKey });
     
-    let raw = String(aiRes.result?.response || "");
-    if (raw.includes("```")) raw = raw.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(raw);
+    const raw = String(aiRes.result?.response || "");
+    const parsed = safeParseJson<any>(raw, {});
     
     if (parsed.tool === "web_search_tool" || parsed.tool === "file_read_tool") {
       const res = await runTool(parsed.tool, parsed.input);
@@ -131,9 +147,8 @@ Output ONLY JSON: { "bestIndex": number }`;
     for (let i = 0; i < voterCount; i++) {
       const res = await runTool("ai_think_tool", { prompt: votePrompt, __apiKey: apiKey }, { apiKey });
       try {
-        let raw = String(res.result?.response || "{}");
-        if (raw.includes("```")) raw = raw.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(raw);
+        const raw = String(res.result?.response || "{}");
+        const parsed = safeParseJson<any>(raw, {});
         const idx = parsed.bestIndex;
         if (idx !== undefined && proposals[idx]) {
            votes[idx] = (votes[idx] || 0) + 1;
@@ -174,9 +189,8 @@ ${feedbackContext ? "CRITIC FEEDBACK (Fix these issues): " + feedbackContext : "
 Choose tool: 'file_patch_tool' (for editing workspace files) or 'code_execution_tool'. Output JSON: { "tool": "...", "input": { ... } }. ONLY JSON.`;
     
     const aiRes = await runTool("ai_think_tool", { prompt, __apiKey: apiKey }, { apiKey });
-    let raw = String(aiRes.result?.response || "");
-    if (raw.includes("```")) raw = raw.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(raw);
+    const raw = String(aiRes.result?.response || "");
+    const parsed = safeParseJson<any>(raw, {});
     
     // File Locking check
     if (parsed.tool === "file_patch_tool" && parsed.input?.path) {
@@ -226,9 +240,8 @@ Goal: ${goal}
 Is it valid and high quality? Output JSON: { "isValid": boolean, "feedback": "detailed feedback" }`;
       
       const criticRes = await runTool("ai_think_tool", { prompt: criticPrompt, __apiKey: apiKey }, { apiKey });
-      let raw = String(criticRes.result?.response || '{"isValid":true}');
-      if (raw.includes("```")) raw = raw.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
-      criticOut = JSON.parse(raw);
+      const criticRaw = String(criticRes.result?.response || '{"isValid":true}');
+      criticOut = safeParseJson<any>(criticRaw, { isValid: true, feedback: "" });
       
       if (criticOut.isValid) {
         coderSuccess = true;
@@ -288,14 +301,9 @@ Is it valid and high quality? Output JSON: { "isValid": boolean, "feedback": "de
   const finalizerRes = await runTool("ai_think_tool", { prompt: finalizerPrompt, __apiKey: apiKey }, { apiKey });
   let finalOutput = "Final synthesis failed.";
   if (finalizerRes.success && finalizerRes.result?.response) {
-    let raw = String(finalizerRes.result.response);
-    if (raw.includes("```")) raw = raw.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed.report) finalOutput = parsed.report;
-    } catch (e) {
-      finalOutput = raw;
-    }
+    const raw = String(finalizerRes.result.response);
+    const parsed = safeParseJson<any>(raw, {});
+    finalOutput = parsed.report || raw;
   }
   memory.agentOutputs.finalizer = finalOutput;
 

@@ -17,6 +17,39 @@ class CognitiveMemoryStore {
 
   constructor() {
     this.memories = resilience.storage.get<MemoryEntry[]>("memories", []);
+    this.syncWithServer();
+  }
+
+  public async syncWithServer() {
+    try {
+      const res = await fetch("/api/memory");
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.facts) {
+          const serverFacts = data.facts.map((f: any) => ({
+            id: f.id || `mem-srv-${Date.now()}-${Math.random()}`,
+            category: "fact" as const,
+            content: f.text,
+            timestamp: f.timestamp || new Date().toISOString(),
+            tags: f.tags || []
+          }));
+          
+          const merged = [...this.memories];
+          serverFacts.forEach((sf: any) => {
+            const exists = merged.some(m => m.content === sf.content);
+            if (!exists) {
+              merged.push(sf);
+            }
+          });
+          
+          this.memories = merged;
+          resilience.storage.set("memories", this.memories);
+          this.notify();
+        }
+      }
+    } catch (err) {
+      logger.error(`[Memory Sync] Failed to sync memories with server:`, err);
+    }
   }
 
   private saveToLocal() {
@@ -45,11 +78,27 @@ class CognitiveMemoryStore {
     this.memories.push(newEntry);
     this.saveToLocal();
     logger.info(`[Memory] Yeni bellek eklendi (${category}): ${content.substring(0, 30)}...`);
+
+    // Sync to server API asynchronously
+    fetch("/api/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: content })
+    }).catch(err => logger.error(`[Memory Sync] Error syncing memory to server:`, err));
   }
 
   public removeMemory(id: string) {
+    const found = this.memories.find(m => m.id === id);
     this.memories = this.memories.filter(m => m.id !== id);
     this.saveToLocal();
+
+    if (found) {
+      fetch("/api/memory/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: found.content })
+      }).catch(err => logger.error(`[Memory Sync] Error removing memory from server:`, err));
+    }
   }
 
   public getMemories() {

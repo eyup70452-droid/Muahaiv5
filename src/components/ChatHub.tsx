@@ -580,6 +580,7 @@ export default function ChatHub({
   const [aiMode, setAiMode] = useState<"fast" | "balanced" | "deep" | "agent" | "swarm" | "research" | "planner">("balanced");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync initial routing mode on mount
   useEffect(() => {
@@ -673,6 +674,13 @@ export default function ChatHub({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isSettingsOpen]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+    }
+  }, [inputText]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -1558,14 +1566,13 @@ export default function ChatHub({
             {/* Message input area */}
             <div className="w-full">
               <textarea
+                ref={textareaRef}
                 rows={1}
                 className="w-full bg-transparent border-0 p-1.5 text-gray-100 text-xs placeholder-gray-500 focus:outline-none focus:ring-0 font-sans resize-none scrollbar-none leading-relaxed"
                 placeholder="Mesajınızı buraya yazın veya komutlar için '/' karakterini kullanın..."
                 value={inputText}
                 onChange={(e) => {
                   setInputText(e.target.value);
-                  e.target.style.height = 'auto';
-                  e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
                 }}
                 onKeyDown={handleKeyDown}
                 disabled={isSending}
@@ -1602,6 +1609,144 @@ export default function ChatHub({
                 >
                   {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
                 </button>
+
+                {/* Model select trigger inside chat input toolbar */}
+                <div className="h-4 w-[1px] bg-[#1f1f26] mx-2" />
+                <div className="relative shrink-0 flex items-center h-full font-mono">
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-zinc-400 bg-zinc-900/30 border border-zinc-800/50 hover:bg-zinc-800/40 hover:text-rose-400 focus:outline-none focus:border-rose-500/30 transition-all shrink-0 rounded-xl max-w-[130px] sm:max-w-[180px] md:max-w-[220px]"
+                  >
+                    <Cpu className="w-3.5 h-3.5 text-rose-500/70 shrink-0" />
+                    <span className="truncate flex-1 text-left font-semibold">
+                      {selectedModelType === "auto" 
+                        ? "AUTO" 
+                        : selectedModelType === "hybrid" 
+                          ? "AGENT: IDE" 
+                          : `${(models?.find(m => m.id === selectedModelType)?.displayName || selectedModelType).split('/').pop()?.toUpperCase()}`}
+                    </span>
+                    <span className="text-zinc-600 text-[8px] shrink-0">▼</span>
+                  </button>
+
+                  {/* Popover Settings Panel */}
+                  {isSettingsOpen && (
+                    <div
+                      ref={settingsRef}
+                      className="absolute bottom-11 left-0 w-80 max-h-[70vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-800 scrollbar-track-transparent bg-[#111115]/95 backdrop-blur-md border border-[#1f1f26] rounded-2xl shadow-2xl p-4 z-50 space-y-4 font-sans animate-fade-in text-gray-200"
+                    >
+                      <div className="flex items-center justify-between border-b border-[#1f1f26] pb-2.5">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">Bilişsel Çekirdek Ayarları</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsSettingsOpen(false)}
+                          className="px-2.5 py-1 rounded bg-zinc-900/60 border border-zinc-800 text-gray-400 hover:text-white hover:bg-rose-500/10 hover:border-rose-500/20 transition-all text-[8px] font-bold uppercase tracking-wider font-mono"
+                        >
+                          Kapat
+                        </button>
+                      </div>
+
+                      <div className="space-y-3 pt-1 font-sans">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => { 
+                              setSelectedModelType("auto"); 
+                              setExpandedProvider(null);
+                              onChangeRoutingMode("best_match");
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition-all ${
+                              selectedModelType === "auto"
+                                ? "bg-rose-500/5 border-rose-500/25 text-rose-400"
+                                : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:bg-[#1c1c25] hover:text-gray-200"
+                            }`}
+                          >
+                            <div className="text-[11px] font-bold flex items-center gap-1.5">
+                              <Zap className="w-3 h-3" />
+                              Otomatik
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { 
+                              setSelectedModelType("hybrid"); 
+                              setExpandedProvider(null);
+                              onChangeRoutingMode("parallel");
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition-all ${
+                              selectedModelType === "hybrid"
+                                ? "bg-rose-500/5 border-rose-500/25 text-rose-400 animate-pulse"
+                                : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:bg-[#1c1c25] hover:text-gray-200"
+                            }`}
+                          >
+                            <div className="text-[11px] font-bold flex items-center gap-1.5">
+                              <Sparkles className="w-3 h-3" />
+                              Ajan İDE
+                            </div>
+                          </button>
+                        </div>
+
+                        {providers?.filter(p => p.hasKey).map(p => {
+                          const isActiveModel = models?.find(m => m.provider === p.id && m.id === selectedModelType);
+                          return (
+                            <div key={p.id} className="col-span-2">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedProvider(expandedProvider === p.id ? null : p.id)}
+                                className={`w-full p-2.5 rounded-xl border text-left transition-all ${
+                                  expandedProvider === p.id || isActiveModel
+                                    ? "bg-[#16161f] border-rose-500/20 text-rose-400"
+                                    : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
+                                }`}
+                              >
+                                <div className="text-[11px] font-semibold flex items-center gap-2">
+                                  <span>{p.logo}</span>
+                                  <span className="flex-1 text-left">{p.name}</span>
+                                  {isActiveModel && (
+                                    <span className="text-[8px] bg-rose-500/10 text-rose-400 px-1.5 py-0.5 rounded-full border border-rose-500/20 font-bold uppercase tracking-tighter">
+                                      {isActiveModel.displayName.split('/').pop()}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                              
+                              {expandedProvider === p.id && (
+                                <div className="grid grid-cols-1 gap-1 mt-1.5 pl-2 border-l border-[#1f1f26] ml-2">
+                                  {models?.filter(m => m.provider === p.id && (!freeOnly || m.isFree)).map((m, idx) => (
+                                    <button
+                                      key={`${p.id}-${m.id}-${idx}`}
+                                      type="button"
+                                      onClick={() => { 
+                                        setSelectedModelType(m.id); 
+                                        if(onSelectModel) onSelectModel(m.id); 
+                                        onChangeRoutingMode("manuel");
+                                      }}
+                                      className={`p-1.5 px-2 rounded-xl border text-left transition-all ${
+                                        selectedModelType === m.id
+                                          ? "bg-rose-500/5 border-rose-500/25 text-rose-400 font-bold"
+                                          : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
+                                      }`}
+                                    >
+                                      <div className="text-[10px] font-medium flex items-center justify-between">
+                                        <span>{m.displayName}</span>
+                                        {m.isFree && (
+                                          <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 rounded uppercase font-bold tracking-tighter border border-emerald-500/20 shrink-0 font-sans">Free</span>
+                                        )}
+                                      </div>
+                                    </button>
+                                  ))}
+                                  {(models?.filter(m => m.provider === p.id).length || 0) === 0 && (
+                                    <div className="text-[10px] text-gray-500 p-1 font-sans">Model bulunamadı. Lütfen API anahtarını kontrol edin.</div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Popover Tool Menu */}
                 {showToolMenu && (
@@ -1746,323 +1891,6 @@ export default function ChatHub({
                 </button>
 
                 <SystemNotificationCenter />
-
-                {/* Model select trigger */}
-                <div className="relative shrink-0 flex items-center h-full font-mono">
-                  <button
-                    type="button"
-                    onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                    className="flex items-center gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-400 bg-zinc-900/30 border border-zinc-800/50 hover:bg-zinc-800/40 hover:text-rose-400 focus:outline-none focus:border-rose-500/30 transition-all shrink-0 rounded-lg max-w-[130px] sm:max-w-[180px] md:max-w-[220px]"
-                  >
-                    <Cpu className="w-3.5 h-3.5 text-rose-500/70 shrink-0" />
-                    <span className="truncate flex-1 text-left font-semibold">
-                      {selectedModelType === "auto" 
-                        ? "ROUTER: AUTO" 
-                        : selectedModelType === "hybrid" 
-                          ? "AGENT: IDE" 
-                          : `MODEL: ${(models?.find(m => m.id === selectedModelType)?.displayName || selectedModelType).split('/').pop()?.toUpperCase()}`}
-                    </span>
-                    <span className="text-zinc-600 text-[9px] shrink-0">▼</span>
-                  </button>
-
-                  {/* Popover Settings Panel */}
-                  {isSettingsOpen && (
-                    <div
-                      ref={settingsRef}
-                      className="absolute top-10 right-0 w-80 max-h-[85vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-800 scrollbar-track-transparent bg-[#111115]/95 backdrop-blur-md border border-[#1f1f26] rounded-2xl shadow-2xl p-4.5 z-50 space-y-4 font-sans animate-fade-in text-gray-200"
-                    >
-                      <div className="flex items-center justify-between border-b border-[#1f1f26] pb-2.5">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">Bilişsel Çekirdek Ayarları</span>
-                        <button
-                          type="button"
-                          onClick={() => setIsSettingsOpen(false)}
-                          className="px-2.5 py-1 rounded bg-zinc-900/60 border border-zinc-800 text-gray-400 hover:text-white hover:bg-rose-500/10 hover:border-rose-500/20 transition-all text-[8px] font-bold uppercase tracking-wider font-mono"
-                        >
-                          Kapat
-                        </button>
-                      </div>
-
-                      <div className="space-y-3 pt-1">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => { 
-                              setSelectedModelType("auto"); 
-                              setExpandedProvider(null);
-                              onChangeRoutingMode("best_match");
-                            }}
-                            className={`p-2.5 rounded-xl border text-left transition-all ${
-                              selectedModelType === "auto"
-                                ? "bg-rose-500/5 border-rose-500/25 text-rose-400"
-                                : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:bg-[#1c1c25] hover:text-gray-200"
-                            }`}
-                          >
-                            <div className="text-[11px] font-bold flex items-center gap-1.5">
-                              <Zap className="w-3 h-3" />
-                              Otomatik
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { 
-                              setSelectedModelType("hybrid"); 
-                              setExpandedProvider(null);
-                              onChangeRoutingMode("parallel");
-                            }}
-                            className={`p-2.5 rounded-xl border text-left transition-all ${
-                              selectedModelType === "hybrid"
-                                ? "bg-rose-500/5 border-rose-500/25 text-rose-400 animate-pulse"
-                                : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:bg-[#1c1c25] hover:text-gray-200"
-                            }`}
-                          >
-                            <div className="text-[11px] font-bold flex items-center gap-1.5">
-                              <Sparkles className="w-3 h-3" />
-                              Ajan İDE
-                            </div>
-                          </button>
-                        </div>
-
-                        {providers?.filter(p => p.hasKey).map(p => {
-                          const isActiveModel = models?.find(m => m.provider === p.id && m.id === selectedModelType);
-                          return (
-                            <div key={p.id} className="col-span-2">
-                              <button
-                                type="button"
-                                onClick={() => setExpandedProvider(expandedProvider === p.id ? null : p.id)}
-                                className={`w-full p-2.5 rounded-xl border text-left transition-all ${
-                                  expandedProvider === p.id || isActiveModel
-                                    ? "bg-[#16161f] border-rose-500/20 text-rose-400"
-                                    : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
-                                }`}
-                              >
-                                <div className="text-[11px] font-semibold flex items-center gap-2">
-                                  <span>{p.logo}</span>
-                                  <span className="flex-1">{p.name}</span>
-                                  {isActiveModel && (
-                                    <span className="text-[9px] bg-rose-500/10 text-rose-400 px-1.5 py-0.5 rounded-full border border-rose-500/20 font-bold uppercase tracking-tighter">
-                                      {isActiveModel.displayName}
-                                    </span>
-                                  )}
-                                </div>
-                              </button>
-                              {expandedProvider === p.id && (
-                                <div className="grid grid-cols-1 gap-1 mt-1.5 pl-2 border-l border-[#1f1f26] ml-2">
-                                  {models?.filter(m => m.provider === p.id && (!freeOnly || m.isFree)).map((m, idx) => (
-                                    <button
-                                      key={`${p.id}-${m.id}-${idx}`}
-                                      type="button"
-                                      onClick={() => { 
-                                        setSelectedModelType(m.id); 
-                                        if(onSelectModel) onSelectModel(m.id); 
-                                        onChangeRoutingMode("manuel");
-                                      }}
-                                      className={`p-1.5 px-2 rounded-xl border text-left transition-all ${
-                                        selectedModelType === m.id
-                                          ? "bg-rose-500/5 border-rose-500/25 text-rose-400 font-bold"
-                                          : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
-                                      }`}
-                                    >
-                                      <div className="text-[10px] font-medium flex items-center justify-between">
-                                        <span>{m.displayName}</span>
-                                        {m.isFree && (
-                                          <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1 rounded uppercase font-bold tracking-tighter border border-emerald-500/20 shrink-0">Free</span>
-                                        )}
-                                      </div>
-                                    </button>
-                                  ))}
-                                  {(models?.filter(m => m.provider === p.id).length || 0) === 0 && (
-                                    <div className="text-[10px] text-gray-500 p-1">Model bulunamadı. Lütfen API anahtarını kontrol edin.</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        <div className="pt-2 pb-1 border-t border-[#1f1f26] mt-2">
-                          <span className="text-[9px] font-bold text-gray-500 uppercase tracking-[0.2em] ml-1">Özel Servisler</span>
-                        </div>
-                        {customProviders?.filter(p => p.name).map(p => {
-                          const isExpanded = expandedProvider === p.id;
-                          const isCurrentModelFromThisProvider = selectedModelType === p.modelId || (p.fetchedModels?.includes(selectedModelType));
-                          
-                          return (
-                            <div key={p.id} className="col-span-2 group/custom">
-                              <button
-                                type="button"
-                                onClick={() => setExpandedProvider(isExpanded ? null : p.id)}
-                                className={`w-full p-2.5 rounded-xl border text-left transition-all duration-300 relative overflow-hidden ${
-                                  isExpanded || isCurrentModelFromThisProvider
-                                    ? "bg-rose-500/5 border-rose-500/25 text-rose-400"
-                                    : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
-                                }`}
-                              >
-                                <div className="text-[11px] font-bold flex items-center gap-2">
-                                  <span className={isCurrentModelFromThisProvider ? "text-rose-400" : "text-gray-600"}>⚡</span>
-                                  <span className="flex-1 tracking-tight">{p.name}</span>
-                                  {isCurrentModelFromThisProvider && (
-                                    <span className="text-[8px] bg-rose-500/10 text-rose-400 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter">
-                                      Aktif
-                                    </span>
-                                  )}
-                                  <ChevronDown className={`w-3 h-3 transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`} />
-                                </div>
-                              </button>
-                              {isExpanded && (
-                                <div className="grid grid-cols-1 gap-1 mt-1 pl-3 border-l border-[#1f1f26] ml-2.5 animate-in fade-in slide-in-from-top-1 duration-300">
-                                  {p.modelId && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (onActivateCustomProvider) onActivateCustomProvider(p.id);
-                                        setSelectedModelType(p.modelId);
-                                        onChangeRoutingMode("manuel");
-                                      }}
-                                      className={`p-1.5 px-2 rounded-xl border text-left transition-all group/model ${
-                                        selectedModelType === p.modelId
-                                          ? "bg-rose-500/5 border-rose-500/25 text-rose-400 font-bold"
-                                          : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
-                                      }`}
-                                    >
-                                      <div className="text-[10px] font-mono tracking-tighter flex items-center justify-between">
-                                        <span>{p.modelId}</span>
-                                        <span className="text-[8px] opacity-40 italic">MANUEL</span>
-                                      </div>
-                                    </button>
-                                  )}
-                                  {p.fetchedModels?.map((m, idx) => (
-                                    <button
-                                      key={`${p.id}-${m}-${idx}`}
-                                      type="button"
-                                      onClick={() => {
-                                        if (onActivateCustomProvider) onActivateCustomProvider(p.id);
-                                        setSelectedModelType(m);
-                                        onChangeRoutingMode("manuel");
-                                      }}
-                                      className={`p-1.5 px-2 rounded-xl border text-left transition-all ${
-                                        selectedModelType === m
-                                          ? "bg-rose-500/5 border-rose-500/25 text-rose-400 font-bold"
-                                          : "bg-[#16161f] border-[#1f1f26] text-gray-400 hover:bg-[#1c1c25] hover:text-gray-200"
-                                      }`}
-                                    >
-                                      <div className="text-[10px] font-mono tracking-tighter">{m}</div>
-                                    </button>
-                                  ))}
-                                  {!p.modelId && (!p.fetchedModels || p.fetchedModels.length === 0) && (
-                                    <div className="text-[9px] text-gray-600 p-2 italic bg-[#16161f] border border-[#1f1f26] rounded-xl">Model bulunamadı. Ayarlardan çekin.</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Düşünme Modu Toggle */}
-                      <div className="space-y-1.5 border-t border-[#1f1f26]/60 pt-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 text-[11px]">
-                            <span className="text-gray-400 font-semibold tracking-wider">Düşünme Modu</span>
-                            <InfoTooltip text="Yapay zekanın yanıt vermeden önce derinlemesine düşünmesini ve akıl yürütmesini etkinleştirir." />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setDeepThinkEnabled(!deepThinkEnabled)}
-                            className={`px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${
-                              deepThinkEnabled
-                                ? "bg-rose-500/10 border-rose-500/30 text-rose-400"
-                                : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:text-gray-300"
-                            }`}
-                          >
-                            {deepThinkEnabled ? "AÇIK" : "KAPALI"}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Effort Level */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-gray-400 font-semibold tracking-wider">Muhakeme Derinliği (Efor)</span>
-                            <InfoTooltip text="Efor düzeyini artırarak daha zengin sorgulama, doğrulama ve analiz süreçlerini tetikleyin." />
-                          </div>
-                          <span className="text-rose-400 font-bold text-[10px] tracking-wide">{effortLevel.toUpperCase()}</span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-1">
-                          {[
-                            { value: "low", label: "Düşük", desc: "Hızlı ve pratik" },
-                            { value: "medium", label: "Orta", desc: "Dengeli analiz" },
-                            { value: "high", label: "Yüksek", desc: "Detaylı muhakeme" },
-                            { value: "max", label: "Maks", desc: "Derin düşünme" }
-                          ].map((lvl) => (
-                            <button
-                              key={lvl.value}
-                              type="button"
-                              onClick={() => setEffortLevel(lvl.value as any)}
-                              className={`py-1.5 rounded-xl text-[10px] font-bold border transition-all ${
-                                effortLevel === lvl.value
-                                  ? "bg-rose-500/5 border-rose-500/25 text-rose-400"
-                                  : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:bg-[#1c1c25] hover:text-gray-200"
-                              }`}
-                              title={lvl.desc}
-                            >
-                              {lvl.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Behavior Modes */}
-                      <div className="space-y-1.5">
-                        <label className="text-[11px] text-gray-400 font-semibold tracking-wider block">Sohbet Davranış Modu</label>
-                        <select
-                          value={behaviorMode}
-                          onChange={(e) => setBehaviorMode(e.target.value as any)}
-                          className="w-full bg-[#16161f] border border-[#1f1f26] rounded-xl p-2.5 text-xs text-gray-100 focus:outline-none focus:border-rose-500/30 cursor-pointer transition-colors"
-                        >
-                          <option value="normal">Normal Mod (Standart Akış)</option>
-                          <option value="assistant">Asistan Modu (Nazik ve Açıklayıcı)</option>
-                          <option value="expert">Uzman Modu (Sıkı Tip Güvenliği ve Kod)</option>
-                          <option value="architect">Mimar Modu (Sistem Tasarımı ve Mantık)</option>
-                        </select>
-                      </div>
-
-                      {/* AI Work Mode */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5 text-[11px]">
-                          <span className="text-gray-400 font-semibold tracking-wider">İşlem Yapısı (AI Mode)</span>
-                          <InfoTooltip text="fast: Direkt model yanıtı. balanced: Otomatik kelime bazlı araç çağrıları. deep: Çıkarım ve mantık zinciri. agent: Otonom tekli ajan. swarm: Çoklu ajan ekibi." />
-                        </div>
-                        <div className="grid grid-cols-4 gap-1">
-                          {[
-                            { value: "fast", label: "Hızlı" },
-                            { value: "balanced", label: "Denge" },
-                            { value: "deep", label: "Derin" },
-                            { value: "agent", label: "Ajan" },
-                            { value: "swarm", label: "Swarm" },
-                            { value: "research", label: "Araştır" },
-                            { value: "planner", label: "Planla" }
-                          ].map((modeItem) => (
-                            <button
-                              key={modeItem.value}
-                              type="button"
-                              onClick={() => setAiMode(modeItem.value as any)}
-                              className={`py-1.5 rounded-xl text-[9px] font-bold border transition-all uppercase tracking-wider ${
-                                aiMode === modeItem.value
-                                  ? "bg-rose-500/5 border-rose-500/25 text-rose-400"
-                                  : "bg-[#16161f] border-[#1f1f26] text-gray-500 hover:bg-[#1c1c25] hover:text-gray-200"
-                              }`}
-                            >
-                              {modeItem.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="p-1"></div>
-                    </div>
-                  )}
-                </div>
               </div>,
               portalTarget
             )}

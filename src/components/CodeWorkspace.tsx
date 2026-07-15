@@ -244,7 +244,7 @@ export default function CodeWorkspace({
   const generateAiRefactor = async () => {
     if (!aiPrompt.trim() || isApplyingAi) return;
     setIsApplyingAi(true);
-    setTerminalOutput((prev) => `${prev}\n[${new Date().toLocaleTimeString()}] [!] Yapay zeka derleme talimatı gönderiliyor...`);
+    setTerminalOutput((prev) => `${prev}\n[${new Date().toLocaleTimeString()}] [!] Yapay zeka yama tabanlı düzenleme talimatı gönderiliyor...`);
 
     try {
       const res = await fetch("/api/tool/run", {
@@ -253,13 +253,19 @@ export default function CodeWorkspace({
         body: JSON.stringify({
           toolId: "ai_think_tool",
           input: {
-            prompt: `Refactor this code based on user prompt.
-Instruction: ${aiPrompt}
+            prompt: `Sen bir kod refaktör uzmanısın. Kullanıcının talimatına göre belirtilen kodu düzenlemek için arama-değiştirme (search and replace) yamaları üretmelisin.
+Talimat: ${aiPrompt}
 
-[ORIGINAL CODE]:
+[ORİJİNAL KOD]:
 ${currentContent}
 
-Important: Your "response" must be the complete updated code, and nothing else (no markdown blocks, no commentary, just the plain code so it compiles).`
+Çıktın SADECE geçerli bir JSON dizisi olmalıdır. Her eleman tam olarak bir yama içermelidir:
+{
+  "search": "değiştirilecek orijinal kod bloğu (birebir eşleşmeli, boşluklar dahil)",
+  "replace": "yeni kod bloğu"
+}
+
+Önemli: Yanıtında sadece saf JSON dizisi döndür (markdown kod blokları kullanabilirsin ama başka açıklama ekleme).`
           }
         })
       });
@@ -268,16 +274,40 @@ Important: Your "response" must be the complete updated code, and nothing else (
         const data = await res.json();
         if (data.success && data.result) {
           const { thinking, response } = data.result;
-          setTerminalOutput((prev) => `${prev}\n[DÜŞÜNCE GÜNLÜĞÜ]:\n${thinking}\n\n[BAŞARI] Yapay zeka kodu optimize etti.`);
+          setTerminalOutput((prev) => `${prev}\n[DÜŞÜNCE GÜNLÜĞÜ]:\n${thinking}\n\n[BAŞARI] Yapay zeka yamaları oluşturdu.`);
           setDiffOriginal(currentContent);
           
-          let cleanedCode = response || "";
-          if (cleanedCode.includes("```")) {
-            cleanedCode = cleanedCode.replace(/```[a-zA-Z]*\n/g, "").replace(/```/g, "").trim();
+          let cleanedResponse = response || "";
+          if (cleanedResponse.includes("```")) {
+            cleanedResponse = cleanedResponse.replace(/```(?:json)?\n/g, "").replace(/```/g, "").trim();
           }
           
-          setDiffSuggested(cleanedCode);
-          setHasDiff(true);
+          try {
+            const patches = JSON.parse(cleanedResponse);
+            if (Array.isArray(patches)) {
+              let applied = currentContent;
+              let patchCount = 0;
+              for (const p of patches) {
+                if (p.search && typeof p.replace === "string") {
+                  if (applied.includes(p.search)) {
+                    applied = applied.split(p.search).join(p.replace);
+                    patchCount++;
+                  } else {
+                    setTerminalOutput((prev) => `${prev}\n[UYARI] Yama uygulanamadı (kod eşleşmedi): ${p.search.slice(0, 40)}...`);
+                  }
+                }
+              }
+              setTerminalOutput((prev) => `${prev}\n[BİLGİ] Toplam ${patchCount}/${patches.length} yama başarıyla uygulandı.`);
+              setDiffSuggested(applied);
+              setHasDiff(true);
+            } else {
+              throw new Error("Yanıt bir JSON dizisi değil.");
+            }
+          } catch (jsonErr: any) {
+            setTerminalOutput((prev) => `${prev}\n[BİLGİ] Yama JSON ayrıştırılamadı, tam dosya yazımına geri dönülüyor...`);
+            setDiffSuggested(cleanedResponse);
+            setHasDiff(true);
+          }
         } else {
           throw new Error(data.error || "Sunucudan geçerli bir derleme yanıtı alınamadı.");
         }

@@ -37,6 +37,7 @@ import { runSwarmTask } from "./core/swarm/runSwarmTask";
 import { extractMemories } from "./core/memory/memoryExtractor";
 import { routeModel } from "./core/agents/modelRouter";
 import { getApiKeys, setApiKeys } from "./lib/encryption";
+import { systemEvents } from "./core/utils/systemEvents";
 
 export function parseThinkingTags(text: string): { content: string; reasoning: string } {
   let content = text;
@@ -90,6 +91,19 @@ export default function App() {
   // Responsive UI States
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRightRailOpen, setIsRightRailOpen] = useState(false);
+
+  // Prevent mobile overlay conflict
+  useEffect(() => {
+    if (isSidebarOpen && window.innerWidth < 768) {
+      setIsRightRailOpen(false);
+    }
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    if (isRightRailOpen && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+    }
+  }, [isRightRailOpen]);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [isCustomSettingsOpen, setIsCustomSettingsOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
@@ -1336,6 +1350,8 @@ export default function App() {
                               m.id === assistantMsgId ? { ...m, reasoning: currentThinking } : m
                             )
                           }));
+                        } else if (data.type === "notification") {
+                          systemEvents.emit("system", data.message);
                         } else if (data.type === "tool_start") {
                           const { tool } = data;
                           logger.info(`[Tool] Araç başlatıldı: ${tool.toolName}`, tool.input);

@@ -109,7 +109,8 @@ export async function getToolRegistry(): Promise<Record<string, Tool>> {
             throw new Error("API key is not defined in environment variables and no custom API key provided.");
           }
 
-          if (key.length === 39 && !key.startsWith("sk-")) {
+          const isGeminiKey = key.startsWith("AIzaSy") || (key.length >= 35 && !key.startsWith("sk-") && !key.startsWith("gsk_") && !key.startsWith("Bearer "));
+          if (isGeminiKey) {
             const { GoogleGenAI } = await import("@google/genai");
             const ai = new GoogleGenAI({ apiKey: key });
             const response = await ai.models.generateContent({
@@ -228,9 +229,27 @@ export async function getToolRegistry(): Promise<Record<string, Tool>> {
           return { output: "", errors: "Güvenlik Engeli: Kod içinde izin verilmeyen modül veya fonksiyon kullanımı tespit edildi." };
         }
 
-        const ext = input.language === 'typescript' ? 'ts' : 'js';
+        const ext = input.language === 'typescript' ? 'ts' : 'cjs';
         const file = path.join(process.cwd(), `tmp_${Date.now()}.${ext}`);
-        fs.writeFileSync(file, code);
+        
+        // Inject runtime sandboxing wrapper to block malicious imports and process operations
+        const secureCode = `
+const Module = require('module');
+const originalLoad = Module._load;
+Module._load = function(request, parent, isMain) {
+  const reqLower = (request || "").toLowerCase();
+  if (reqLower.includes('child_process') || reqLower.includes('cluster') || reqLower.includes('process')) {
+    throw new Error('Güvenlik Engeli: Sandbox ortamında child_process veya cluster yüklenemez.');
+  }
+  return originalLoad.apply(this, arguments);
+};
+process.kill = () => { throw new Error('process.kill is blocked'); };
+process.exit = () => { throw new Error('process.exit is blocked'); };
+
+// User Code Starts Here
+${code}
+`;
+        fs.writeFileSync(file, secureCode);
         
         return new Promise((resolve) => {
           const cmd = ext === 'ts' ? `npx tsx ${file}` : `node ${file}`;

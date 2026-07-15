@@ -87,7 +87,7 @@ export default function Sidebar({
       )}
 
       <div className={`
-        w-80 h-full bg-[#0c0c10] border-r border-zinc-900/60 flex flex-col font-sans select-none
+        w-64 h-full bg-[#0c0c10] border-r border-zinc-900/60 flex flex-col font-sans select-none
         fixed lg:static inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out
         ${isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
       `} id="sidebar-container" style={{ height: '100dvh' }}>

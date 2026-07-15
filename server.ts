@@ -191,6 +191,53 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// Custom lightweight security headers middleware (Helmet-like)
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; media-src 'self' https: blob:;");
+  next();
+});
+
+// Custom lightweight in-memory rate limiter
+const ipRequestCounts = new Map<string, { count: number; resetAt: number }>();
+app.use((req, res, next) => {
+  const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1 minute window
+  const limit = 200; // Limit to 200 requests per minute
+  
+  const record = ipRequestCounts.get(ip);
+  if (!record || now > record.resetAt) {
+    ipRequestCounts.set(ip, { count: 1, resetAt: now + windowMs });
+    next();
+  } else {
+    record.count++;
+    if (record.count > limit) {
+      return res.status(429).json({ success: false, error: "Çok fazla istek gönderildi. Lütfen bir dakika bekleyin." });
+    }
+    next();
+  }
+});
+
+// Custom lightweight audit logging to server_audit.log
+const AUDIT_LOG_FILE = path.join(process.cwd(), "server_audit.log");
+app.use((req, res, next) => {
+  const start = Date.now();
+  const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "unknown";
+  
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const logLine = `${new Date().toISOString()} | IP: ${ip} | ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Time: ${duration}ms\n`;
+    fs.appendFile(AUDIT_LOG_FILE, logLine, (err) => {
+      if (err) console.error("[AuditLog] Failed to write log:", err);
+    });
+  });
+  next();
+});
+
 // Increase request size limits to avoid memory crashes on large files
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ limit: "5mb", extended: true }));
@@ -225,7 +272,15 @@ app.get("/api/files/list", (req, res) => {
 app.get("/api/files/download_raw/:b64Path", (req, res) => {
   try {
     const filePath = Buffer.from(req.params.b64Path, 'base64').toString('utf-8');
-    const fullPath = path.resolve(process.cwd(), filePath);
+    
+    let realCwd: string;
+    try {
+      realCwd = fs.realpathSync(process.cwd());
+    } catch (e) {
+      realCwd = path.resolve(process.cwd());
+    }
+
+    const fullPath = path.resolve(realCwd, filePath);
     
     // Prevent leaving CWD and handle symlinks safely
     let realPath: string;
@@ -234,15 +289,8 @@ app.get("/api/files/download_raw/:b64Path", (req, res) => {
     } catch (e) {
       realPath = fullPath;
     }
-    
-    let realCwd: string;
-    try {
-      realCwd = fs.realpathSync(process.cwd());
-    } catch (e) {
-      realCwd = process.cwd();
-    }
 
-    if (!realPath.startsWith(realCwd)) {
+    if (!realPath.startsWith(realCwd) || !fullPath.startsWith(realCwd)) {
       return res.status(403).send("Erişim reddedildi.");
     }
     
@@ -439,6 +487,14 @@ app.get("/api/models", async (req, res) => {
   // Rich list of standard, well-known fallback models
   const baseModels = [
     {
+      id: "claude-3-7-sonnet",
+      provider: "anthropic",
+      displayName: "Claude 3.7 Sonnet",
+      category: ["text", "code", "vision", "reasoning"],
+      contextWindow: 200000,
+      pricing: { inputPer1M: 3.00, outputPer1M: 15.00 }
+    },
+    {
       id: "claude-3-5-sonnet",
       provider: "anthropic",
       displayName: "Claude 3.5 Sonnet",
@@ -455,6 +511,14 @@ app.get("/api/models", async (req, res) => {
       pricing: { inputPer1M: 0.80, outputPer1M: 4.00 }
     },
     {
+      id: "claude-3-opus",
+      provider: "anthropic",
+      displayName: "Claude 3 Opus",
+      category: ["text", "code", "vision"],
+      contextWindow: 200000,
+      pricing: { inputPer1M: 15.00, outputPer1M: 75.00 }
+    },
+    {
       id: "gpt-4o",
       provider: "openai",
       displayName: "GPT-4o (OpenAI)",
@@ -469,6 +533,22 @@ app.get("/api/models", async (req, res) => {
       category: ["text", "code", "vision"],
       contextWindow: 128000,
       pricing: { inputPer1M: 0.150, outputPer1M: 0.60 }
+    },
+    {
+      id: "o1",
+      provider: "openai",
+      displayName: "OpenAI o1",
+      category: ["text", "code", "reasoning"],
+      contextWindow: 200000,
+      pricing: { inputPer1M: 15.00, outputPer1M: 60.00 }
+    },
+    {
+      id: "o3-mini",
+      provider: "openai",
+      displayName: "OpenAI o3-mini",
+      category: ["text", "code", "reasoning"],
+      contextWindow: 200000,
+      pricing: { inputPer1M: 1.10, outputPer1M: 4.40 }
     },
     {
       id: "gemini-2.5-flash",
@@ -723,11 +803,11 @@ ${conversationHistory}`;
             config: { 
               responseMimeType: "application/json",
               safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_NONE }
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
               ]
             }
           });
@@ -811,7 +891,21 @@ app.post("/api/tool/run", async (req, res) => {
 // Resilient API Helper functions
 function estimateTokenCount(text: string): number {
   if (!text) return 0;
-  return Math.ceil(text.length / 3.9);
+  // Standard English words are ~3.9 chars per token.
+  // Turkish characters (ş, ğ, ü, ö, ç, ı, etc.) occupy more bytes and are split into multiple sub-tokens by standard tokenizers.
+  // Let's count Turkish characters as 1.5 tokens each, and other characters as 1/3.2 of a token.
+  let tokens = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (/[şğüöçıŞĞÜÖÇİ]/.test(char)) {
+      tokens += 1.5;
+    } else if (/[a-zA-Z0-9]/.test(char)) {
+      tokens += 0.28; // ~3.5 chars per token
+    } else {
+      tokens += 0.35; // spaces, punctuation, etc.
+    }
+  }
+  return Math.ceil(tokens);
 }
 
 // Map custom model IDs to official API identifiers
@@ -829,10 +923,15 @@ function mapModelIdToOfficial(modelId: string, providerId?: string): string {
   switch (modelId) {
     case "claude-3-5-sonnet": officialId = "claude-3-5-sonnet-20241022"; break;
     case "claude-3-5-haiku": officialId = "claude-3-5-haiku-20241022"; break;
+    case "claude-3-opus": officialId = "claude-3-opus-20240229"; break;
+    case "claude-3-7-sonnet": officialId = "claude-3-7-sonnet-20250219"; break;
+    case "deepseek-v3": officialId = "deepseek-chat"; break;
     case "deepseek-r1": officialId = "deepseek-reasoner"; break;
     case "llama-3.1-70b": officialId = "llama-3.1-70b-versatile"; break;
     case "mistral-large": officialId = "mistral-large-latest"; break;
     case "command-r-plus": officialId = "command-r-plus"; break;
+    case "o1": officialId = "o1-2024-12-17"; break;
+    case "o1-preview": officialId = "o1-preview-2024-09-12"; break;
   }
 
   return officialId;
@@ -1036,7 +1135,16 @@ async function fetchWithAdaptiveTokens(
 
 // Key validation and model fetching route
 app.post("/api/validate-key", async (req, res) => {
-  const { providerId, customApiKey } = req.body;
+  const { providerId } = req.body;
+  let customApiKey = req.body.customApiKey;
+  if (!customApiKey && req.headers.authorization) {
+    const parts = req.headers.authorization.split(" ");
+    if (parts.length === 2 && parts[0] === "Bearer") {
+      customApiKey = parts[1];
+    } else {
+      customApiKey = req.headers.authorization;
+    }
+  }
   const actualProviderId = providerId;
 
   if (!customApiKey || !customApiKey.trim()) {
@@ -1092,8 +1200,10 @@ app.post("/api/validate-key", async (req, res) => {
           throw new Error(`Anthropic validation failed: ${response.status} ${text}`);
         }
         fetchedModels = [
+          { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", provider: "anthropic", contextWindow: 200000, pricing: { inputPer1M: 3, outputPer1M: 15 } },
           { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", provider: "anthropic", contextWindow: 200000, pricing: { inputPer1M: 3, outputPer1M: 15 } },
-          { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", provider: "anthropic", contextWindow: 200000, pricing: { inputPer1M: 0.25, outputPer1M: 1.25 } }
+          { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", provider: "anthropic", contextWindow: 200000, pricing: { inputPer1M: 0.25, outputPer1M: 1.25 } },
+          { id: "claude-3-opus-20240229", name: "Claude 3 Opus", provider: "anthropic", contextWindow: 200000, pricing: { inputPer1M: 15, outputPer1M: 75 } }
         ];
       }
       return res.json({ success: true, models: fetchedModels });
@@ -1256,7 +1366,16 @@ app.get("/api/models/benchmark", (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { modelId, providerId, messages, customApiKey, systemInstruction: originalInstruction, webSearchEnabled, attachedFiles, routingMode, aiMode = "balanced", effortLevel = "medium", behaviorMode = "normal", deepThinkEnabled = false, stream = true } = req.body;
+  const { modelId, providerId, messages, systemInstruction: originalInstruction, webSearchEnabled, attachedFiles, routingMode, aiMode = "balanced", effortLevel = "medium", behaviorMode = "normal", deepThinkEnabled = false, stream = true } = req.body;
+  let customApiKey = req.body.customApiKey;
+  if (!customApiKey && req.headers.authorization) {
+    const parts = req.headers.authorization.split(" ");
+    if (parts.length === 2 && parts[0] === "Bearer") {
+      customApiKey = parts[1];
+    } else {
+      customApiKey = req.headers.authorization;
+    }
+  }
   const startTime = Date.now();
   
   const isStreaming = stream !== false;
@@ -1394,6 +1513,11 @@ app.post("/api/chat", async (req, res) => {
     actualModelId = fallback.modelId;
     actualProviderId = fallback.provider;
     sendEvent("reasoning", { content: `⚠️ [Model Health Check] 🔴 ${modelId} (${providerId}) is unhealthy or failing. Auto-fallback to 🟢 ${actualModelId} (${actualProviderId})\n\n` });
+    sendEvent("notification", { 
+      type: "warning", 
+      title: "Model Fallback", 
+      message: `${modelId} şu an yanıt vermiyor. Otomatik olarak ${actualModelId} modeline geçildi.` 
+    });
   }
 
   const targetModel = {
@@ -1787,6 +1911,7 @@ Kurallar:
       else if (actualProviderId === "deepseek") apiUrl = "https://api.deepseek.com/chat/completions";
 
       let iteration = 0;
+      const calledToolsInThisSession = new Set<string>();
       while (iteration < 5) {
         let response = await fetchWithAdaptiveTokens(apiUrl, {
           headers,
@@ -1888,9 +2013,18 @@ Kurallar:
           const message = { role: "assistant", content: responseText, tool_calls: cleanToolCalls };
           currentMessages.push(message);
 
+          let hasRepetitive = false;
           for (const toolCall of cleanToolCalls) {
             const toolName = toolCall.function.name;
             const args = JSON.parse(toolCall.function.arguments || "{}");
+            
+            const toolSignature = `${toolName}:${JSON.stringify(args)}`;
+            if (calledToolsInThisSession.has(toolSignature)) {
+              console.warn(`[Agent Loop] Repetitive tool call detected: ${toolName}. Breaking loop to prevent infinite recursion.`);
+              hasRepetitive = true;
+              break;
+            }
+            calledToolsInThisSession.add(toolSignature);
             
             const initialToolMeta = { toolId: toolCall.id, toolName, input: args, status: "running" };
             sendEvent("tool_start", { tool: initialToolMeta });
@@ -1914,6 +2048,9 @@ Kurallar:
               name: toolName,
               content: JSON.stringify(result)
             });
+          }
+          if (hasRepetitive) {
+            break;
           }
           responseText = ""; // Reset for next turn
           iteration++;
@@ -1942,10 +2079,16 @@ Kurallar:
         }
       });
 
+      // Anthropic strictly requires that the first message is from user
+      if (currentMessages.length > 0 && currentMessages[0].role === "assistant") {
+        currentMessages.shift();
+      }
+
       if (currentMessages.length === 0) {
         currentMessages = [{ role: "user", content: promptPayload }];
       }
       let iteration = 0;
+      const calledToolsInThisSession = new Set<string>();
 
       while (iteration < 5) {
         const response = await executeRequestWithRetry(() => fetch("https://api.anthropic.com/v1/messages", {
@@ -2015,8 +2158,18 @@ Kurallar:
           currentMessages.push({ role: "assistant", content: assistantContent });
 
           const toolResults: any[] = [];
+          let hasRepetitive = false;
           for (const tool of currentToolUse) {
             const args = JSON.parse(tool.input || "{}");
+            
+            const toolSignature = `${tool.name}:${JSON.stringify(args)}`;
+            if (calledToolsInThisSession.has(toolSignature)) {
+              console.warn(`[Agent Loop] Repetitive tool call detected: ${tool.name}. Breaking loop to prevent infinite recursion.`);
+              hasRepetitive = true;
+              break;
+            }
+            calledToolsInThisSession.add(toolSignature);
+            
             const initialToolMeta = { toolId: tool.id, toolName: tool.name, input: args, status: "running" };
             sendEvent("tool_start", { tool: initialToolMeta });
             
@@ -2030,6 +2183,9 @@ Kurallar:
               tool_use_id: tool.id,
               content: JSON.stringify(result)
             });
+          }
+          if (hasRepetitive) {
+            break;
           }
           currentMessages.push({ role: "user", content: toolResults });
           responseText = "";
@@ -2081,11 +2237,11 @@ Kurallar:
             temperature: temperature,
             maxOutputTokens: max_tokens,
             safetySettings: [
-              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_NONE }
+              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+              { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
             ]
           }
         });
@@ -2410,11 +2566,11 @@ app.post("/api/files/upload", upload.single("file"), async (req, res) => {
             ],
             config: {
               safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_NONE }
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
               ]
             }
           });
@@ -2562,11 +2718,11 @@ app.post("/api/files/parse", async (req, res) => {
             ],
             config: {
               safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_NONE }
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+                { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
               ]
             }
           });

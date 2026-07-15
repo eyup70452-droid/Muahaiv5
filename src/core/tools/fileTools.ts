@@ -9,6 +9,9 @@ export const file_read_tool = {
     const path = await import('path');
     try {
       const fullPath = path.resolve(process.cwd(), input.path);
+      if (!fullPath.startsWith(process.cwd())) {
+        return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+      }
       const content = await fs.readFile(fullPath, 'utf-8');
       return { success: true, path: input.path, updatedContent: content };
     } catch (e: any) {
@@ -19,12 +22,15 @@ export const file_read_tool = {
 
 export const file_write_tool = {
   id: "file_write_tool",
-  description: "Writes content to a file (creates or overwrites).",
+  description: "Writes content to a file (creates or overwrites). Sadece YENİ dosya oluşturmak için kullanın. Var olan dosyaları güncellemek için file_patch_tool tercih edin.",
   run: async (input: { path: string, content: string }) => {
     if (!input?.path) return { success: false, error: "Path is required" };
     const fs = await import('fs/promises');
     const path = await import('path');
-    const fullPath = path.isAbsolute(input.path) ? input.path : path.resolve(process.cwd(), input.path);
+    const fullPath = path.resolve(process.cwd(), input.path);
+    if (!fullPath.startsWith(process.cwd())) {
+      return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+    }
     try {
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.writeFile(fullPath, input.content || '', 'utf-8');
@@ -43,6 +49,9 @@ export const file_delete_tool = {
     const fs = await import('fs/promises');
     const path = await import('path');
     const fullPath = path.resolve(process.cwd(), input.path);
+    if (!fullPath.startsWith(process.cwd())) {
+      return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+    }
     try {
       await fs.unlink(fullPath);
       return { success: true, path: input.path };
@@ -63,6 +72,9 @@ export const file_query_tool = {
       
       const ext = path.extname(input.path).toLowerCase();
       const fullPath = path.resolve(process.cwd(), input.path);
+      if (!fullPath.startsWith(process.cwd())) {
+        return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+      }
       const buffer = await fs.readFile(fullPath);
 
       let text = "";
@@ -112,6 +124,9 @@ export const zip_create_tool = {
       const AdmZip = (await import('adm-zip')).default;
       const folderFullPath = path.resolve(process.cwd(), input.folderPath);
       const outputFullPath = path.resolve(process.cwd(), input.outputZip);
+      if (!folderFullPath.startsWith(process.cwd()) || !outputFullPath.startsWith(process.cwd())) {
+        return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+      }
       const zip = new AdmZip();
       zip.addLocalFolder(folderFullPath);
       zip.writeZip(outputFullPath);
@@ -132,6 +147,9 @@ export const zip_extract_tool = {
       const AdmZip = (await import('adm-zip')).default;
       const zipFullPath = path.resolve(process.cwd(), input.zipPath);
       const outputFullPath = path.resolve(process.cwd(), input.outputFolder);
+      if (!zipFullPath.startsWith(process.cwd()) || !outputFullPath.startsWith(process.cwd())) {
+        return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+      }
       const zip = new AdmZip(zipFullPath);
       zip.extractAllTo(outputFullPath, true);
       return { success: true, path: input.outputFolder };
@@ -143,20 +161,32 @@ export const zip_extract_tool = {
 
 export const file_patch_tool = {
   id: "file_patch_tool",
-  description: "Mevcut bir dosyada sadece belirli bir kısmı değiştirmek istediğinde kullan. Önce file_read_tool ile dosyayı oku, sonra değiştirmek istediğin tam metni 'search'e, yeni halini 'replace'e yaz. Tüm dosyayı yeniden yazmak yerine sadece değişen kısmı güncelle.",
+  description: "Mevcut bir dosyada sadece belirli bir kısmı değiştirmek istediğinde kullan. Önce file_read_tool ile dosyayı oku, sonra değiştirmek istediğin tam metni 'search'e, yeni halini 'replace'e yaz. Tüm dosyayı yeniden yazmak yerine sadece değişen kısmı güncelle. Bu araç transactional ve global replace destekler.",
   run: async (input: { path: string, patches: { search: string, replace: string }[] }) => {
-    if (!input?.path || !input?.patches) return { success: false, error: "Path and patches are required" };
+    if (!input?.path || !input?.patches || !Array.isArray(input.patches)) {
+      return { success: false, error: "Path and patches array are required" };
+    }
     const fs = await import('fs/promises');
     const path = await import('path');
-    const fullPath = path.isAbsolute(input.path) ? input.path : path.resolve(process.cwd(), input.path);
+    const fullPath = path.resolve(process.cwd(), input.path);
+    if (!fullPath.startsWith(process.cwd())) {
+      return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+    }
     try {
       let content = await fs.readFile(fullPath, 'utf-8');
+      
+      // Phase 1: Validate all patches exist first (Transactional safety)
       for (const patch of input.patches) {
         if (!content.includes(patch.search)) {
-           return { success: false, error: `Search string not found in file: ${patch.search.slice(0, 50)}...` };
+           return { success: false, error: `Search string not found in file: ${patch.search.slice(0, 80)}...` };
         }
-        content = content.replace(patch.search, patch.replace);
       }
+      
+      // Phase 2: Apply all patches using global replacement (split/join)
+      for (const patch of input.patches) {
+        content = content.split(patch.search).join(patch.replace);
+      }
+      
       await fs.writeFile(fullPath, content, 'utf-8');
       return { success: true, path: input.path, updatedContent: content };
     } catch (err: any) {
@@ -176,6 +206,9 @@ export const zip_analyze_tool = {
       const path = await import('path');
       const AdmZip = (await import('adm-zip')).default;
       const zipFullPath = path.resolve(process.cwd(), input.zipPath);
+      if (!zipFullPath.startsWith(process.cwd())) {
+        return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+      }
       const zip = new AdmZip(zipFullPath);
       const zipEntries = zip.getEntries();
       const files = zipEntries.map(e => ({ name: e.entryName, size: e.header.size, isDirectory: e.isDirectory }));
@@ -193,6 +226,9 @@ export const project_scan_tool = {
     const fs = await import('fs/promises');
     const path = await import('path');
     const targetPath = path.resolve(process.cwd(), input.path || ".");
+    if (!targetPath.startsWith(process.cwd())) {
+      return { success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." };
+    }
     const files: string[] = [];
     const folders: string[] = [];
     const scan = async (dir: string) => {
@@ -236,7 +272,11 @@ export const file_generator_tool = {
     const results = [];
     for (const file of input.files) {
       try {
-        const fullPath = path.isAbsolute(file.path) ? file.path : path.resolve(process.cwd(), file.path);
+        const fullPath = path.resolve(process.cwd(), file.path);
+        if (!fullPath.startsWith(process.cwd())) {
+          results.push({ path: file.path, success: false, error: "Erişim reddedildi: Çalışma dizini sınırları dışına çıkılamaz." });
+          continue;
+        }
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
         await fs.writeFile(fullPath, file.content || '', 'utf-8');
         results.push({ path: file.path, success: true });

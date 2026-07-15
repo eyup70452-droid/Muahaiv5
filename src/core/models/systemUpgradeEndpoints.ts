@@ -825,6 +825,10 @@ Commit mesajı:`;
           // Whitelist specific complete patterns
           const isAllowedPattern = (cmdStr: string): boolean => {
             const clean = cmdStr.trim();
+            // Prevent command chaining/shell injection characters
+            if (/[;&|`$<>(){}]/.test(clean)) {
+              return false;
+            }
             return [
               "git status",
               "git log",
@@ -832,7 +836,7 @@ Commit mesajı:`;
               "npm run lint",
               "npm run build",
               "npm test"
-            ].includes(clean) || clean.startsWith("echo ");
+            ].includes(clean) || /^echo\s+[a-zA-Z0-9\s.,!?-]+$/.test(clean);
           };
 
           if (!isAllowedPattern(trimmedCmd)) {
