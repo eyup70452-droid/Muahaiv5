@@ -1,0 +1,77 @@
+{
+  "coder-primary": {
+    "id": "coder-primary",
+    "name": "GPT-Coder-Alpha",
+    "role": "coder",
+    "expertise": [
+      "typescript",
+      "react",
+      "refactoring"
+    ],
+    "priority": 10,
+    "qualityScore": 80,
+    "successCount": 0,
+    "failCount": 1,
+    "longTermMemory": []
+  },
+  "coder-fallback": {
+    "id": "coder-fallback",
+    "name": "GPT-Coder-Beta",
+    "role": "coder",
+    "expertise": [
+      "javascript",
+      "debugging",
+      "python"
+    ],
+    "priority": 5,
+    "qualityScore": 65,
+    "successCount": 0,
+    "failCount": 1,
+    "longTermMemory": []
+  },
+  "researcher-primary": {
+    "id": "researcher-primary",
+    "name": "Gemini-Research-One",
+    "role": "researcher",
+    "expertise": [
+      "web-search",
+      "data-mining",
+      "summarization"
+    ],
+    "priority": 10,
+    "qualityScore": 75,
+    "successCount": 0,
+    "failCount": 1,
+    "longTermMemory": []
+  },
+  "analyzer-primary": {
+    "id": "analyzer-primary",
+    "name": "Claude-Analyzer",
+    "role": "analyzer",
+    "expertise": [
+      "architecture",
+      "security",
+      "static-analysis"
+    ],
+    "priority": 10,
+    "qualityScore": 90,
+    "successCount": 0,
+    "failCount": 0,
+    "longTermMemory": []
+  },
+  "critic-primary": {
+    "id": "critic-primary",
+    "name": "Critic-X",
+    "role": "critic",
+    "expertise": [
+      "code-review",
+      "qa",
+      "feedback"
+    ],
+    "priority": 10,
+    "qualityScore": 85,
+    "successCount": 0,
+    "failCount": 0,
+    "longTermMemory": []
+  }
+}

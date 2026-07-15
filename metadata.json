@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: AI Nexus Hub",
+  "description": "Multi-provider AI Orchestration console. Manage and compare OpenAI, Claude, Gemini, DeepSeek, and more in a resilient developer-grade dashboard with multi-agent orchestration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
